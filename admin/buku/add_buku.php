@@ -1,7 +1,8 @@
 <?php
+// Pastikan inc/koneksi.php sudah di-include
 include "inc/koneksi.php";
 
-// Ambil kode terakhir id_buku
+// Logika Kode Otomatis ID Buku (B001, B002, dst.)
 $carikode = mysqli_query($koneksi, "SELECT id_buku FROM tb_buku ORDER BY id_buku DESC LIMIT 1");
 $datakode = mysqli_fetch_array($carikode);
 if ($datakode) {
@@ -11,6 +12,7 @@ if ($datakode) {
 } else {
     $tambah = 1;
 }
+
 if (strlen($tambah) == 1) {
     $format = "B00" . $tambah;
 } else if (strlen($tambah) == 2) {
@@ -54,7 +56,7 @@ if (strlen($tambah) == 1) {
 
                     <div class="form-group">
                         <label>Tahun Terbit</label>
-                        <input type="number" name="th_terbit" class="form-control" placeholder="Tahun Terbit" required>
+                        <input type="number" name="th_terbit" class="form-control" placeholder="Tahun Terbit" required min="1000" max="9999" maxlength="4">
                     </div>
                 </div>
 
@@ -70,10 +72,42 @@ if (strlen($tambah) == 1) {
 <?php
 if (isset($_POST['Simpan'])) {
     $id_buku = mysqli_real_escape_string($koneksi, $_POST['id_buku']);
-    $judul_buku = mysqli_real_escape_string($koneksi, $_POST['judul_buku']);
+    $judul_buku = trim(mysqli_real_escape_string($koneksi, $_POST['judul_buku']));
     $pengarang = mysqli_real_escape_string($koneksi, $_POST['pengarang']);
     $penerbit = mysqli_real_escape_string($koneksi, $_POST['penerbit']);
     $th_terbit = mysqli_real_escape_string($koneksi, $_POST['th_terbit']);
+    
+    // FIX Defect 03: Validasi Judul Kosong
+    if (empty($judul_buku)) {
+        echo "<script>
+            Swal.fire({title: 'Tambah Data Gagal', text: 'Judul buku tidak boleh kosong!', icon: 'error'}).then(() => {
+                window.location = 'index.php?page=MyApp/add_buku';
+            });
+        </script>";
+        exit;
+    }
+
+    // FIX Defect 02: Validasi Tahun Terbit (4 digit, rentang wajar)
+    $tahun_sekarang = date("Y");
+    if (!ctype_digit($th_terbit) || strlen($th_terbit) != 4 || $th_terbit < 1000 || $th_terbit > $tahun_sekarang + 1) {
+        echo "<script>
+            Swal.fire({title: 'Tambah Data Gagal', text: 'Tahun Terbit harus 4 digit angka yang valid!', icon: 'error'}).then(() => {
+                window.location = 'index.php?page=MyApp/add_buku';
+            });
+        </script>";
+        exit;
+    }
+
+    // FIX Defect 01: Cek Duplikasi Judul Buku
+    $cek_duplikasi = mysqli_query($koneksi, "SELECT judul_buku FROM tb_buku WHERE judul_buku = '$judul_buku'");
+    if (mysqli_num_rows($cek_duplikasi) > 0) {
+        echo "<script>
+            Swal.fire({title: 'Tambah Data Gagal', text: 'Data buku dengan judul yang sama sudah ada!', icon: 'error'}).then(() => {
+                window.location = 'index.php?page=MyApp/add_buku';
+            });
+        </script>";
+        exit;
+    }
 
     $sql_simpan = "INSERT INTO tb_buku (id_buku,judul_buku,pengarang,penerbit,th_terbit) VALUES (
         '$id_buku','$judul_buku','$pengarang','$penerbit','$th_terbit'
