@@ -1,11 +1,34 @@
 <?php
+// Asumsi file koneksi (inc/koneksi.php) sudah di-include
 include "inc/koneksi.php";
 
+$data_cek = []; // Inisialisasi variabel data_cek
+$kode_pengguna = '';
+
 if (isset($_GET['kode'])) {
-    $kode = mysqli_real_escape_string($koneksi, $_GET['kode']);
-    $sql_cek = "SELECT * FROM tb_pengguna WHERE id_pengguna='$kode'";
-    $query_cek = mysqli_query($koneksi, $sql_cek);
-    $data_cek = mysqli_fetch_array($query_cek, MYSQLI_BOTH);
+    $kode_pengguna = $_GET['kode'];
+    
+    // PERBAIKAN: Gunakan Prepared Statement untuk SELECT/Cek Data
+    $stmt_cek = $koneksi->prepare("SELECT id_pengguna, nama_pengguna, username, level FROM tb_pengguna WHERE id_pengguna = ?");
+    
+    if ($stmt_cek) {
+        $stmt_cek->bind_param("s", $kode_pengguna);
+        $stmt_cek->execute();
+        $result_cek = $stmt_cek->get_result();
+        
+        if ($result_cek->num_rows > 0) {
+            $data_cek = $result_cek->fetch_assoc();
+        } else {
+            // Jika kode tidak ditemukan, arahkan kembali
+            header("location: index.php?page=MyApp/data_pengguna");
+            exit;
+        }
+        $stmt_cek->close();
+    }
+} else {
+    // Jika tidak ada kode di URL, arahkan kembali
+    header("location: index.php?page=MyApp/data_pengguna");
+    exit;
 }
 ?>
 
@@ -20,16 +43,18 @@ if (isset($_GET['kode'])) {
 
             <form action="" method="post">
                 <div class="box-body">
-                    <input type="hidden" name="id_pengguna" value="<?php echo $data_cek['id_pengguna']; ?>"/>
+                    <input type="hidden" name="id_pengguna" value="<?php echo htmlspecialchars($data_cek['id_pengguna']); ?>"/>
+                    <input type="hidden" name="username_lama" value="<?php echo htmlspecialchars($data_cek['username']); ?>"/>
+
 
                     <div class="form-group">
                         <label>Nama Pengguna</label>
-                        <input class="form-control" name="nama_pengguna" value="<?php echo $data_cek['nama_pengguna']; ?>" />
+                        <input class="form-control" name="nama_pengguna" value="<?php echo htmlspecialchars($data_cek['nama_pengguna']); ?>" required maxlength="50"/>
                     </div>
 
                     <div class="form-group">
                         <label>Username</label>
-                        <input class="form-control" name="username" value="<?php echo $data_cek['username']; ?>" />
+                        <input class="form-control" name="username" value="<?php echo htmlspecialchars($data_cek['username']); ?>" required maxlength="30"/>
                     </div>
 
                     <div class="form-group">
@@ -67,34 +92,94 @@ document.getElementById('showPass').addEventListener('change', function() {
 </script>
 
 <?php
-if (isset($_POST['Ubah'])) {
-    $id_pengguna = mysqli_real_escape_string($koneksi, $_POST['id_pengguna']);
-    $nama_pengguna = mysqli_real_escape_string($koneksi, $_POST['nama_pengguna']);
-    $username = mysqli_real_escape_string($koneksi, $_POST['username']);
-    $level = mysqli_real_escape_string($koneksi, $_POST['level']);
+// ====================================================================
+// PROSES UPDATE DATA (Diperbaiki: Prepared Statements & Validasi)
+// ====================================================================
 
-    // jika password tidak kosong -> update, jika kosong -> jangan ubah password
-    if (!empty($_POST['password'])) {
-        $password = md5($_POST['password']);
-        $sql_ubah = "UPDATE tb_pengguna SET nama_pengguna='$nama_pengguna', username='$username', password='$password', level='$level' WHERE id_pengguna='$id_pengguna'";
-    } else {
-        $sql_ubah = "UPDATE tb_pengguna SET nama_pengguna='$nama_pengguna', username='$username', level='$level' WHERE id_pengguna='$id_pengguna'";
+if (isset($_POST['Ubah'])) {
+    
+    // Ambil data
+    $id_pengguna     = $_POST['id_pengguna'];
+    $nama_pengguna   = $_POST['nama_pengguna'];
+    $username        = $_POST['username'];
+    $username_lama   = $_POST['username_lama'];
+    $password_baru   = $_POST['password']; // Password tidak di-sanitasi, akan di-hash
+    $level           = $_POST['level'];
+
+    // 1. Validasi Server-Side (Defect 02/03)
+    if (empty($nama_pengguna) || empty($username) || empty($level)) {
+        echo "<script>
+        Swal.fire({title: 'Data Tidak Lengkap',text: 'Nama Pengguna, Username, dan Level wajib diisi!',icon: 'warning',confirmButtonText: 'OK'
+        }).then(() => {
+            window.location = 'index.php?page=MyApp/edit_pengguna&kode=$id_pengguna';
+        });
+        </script>";
+        exit;
     }
 
-    $query_ubah = mysqli_query($koneksi, $sql_ubah);
+    // 2. Cek Duplikasi Username (Defect 01/03) - hanya jika username berubah
+    $is_duplicate = false;
+    if ($username != $username_lama) {
+        // Gunakan Prepared Statement untuk cek duplikasi
+        $stmt_check_dup = $koneksi->prepare("SELECT id_pengguna FROM tb_pengguna WHERE username = ? AND id_pengguna != ?");
+        
+        if ($stmt_check_dup) {
+            $stmt_check_dup->bind_param("ss", $username, $id_pengguna);
+            $stmt_check_dup->execute();
+            $stmt_check_dup->store_result();
+            if ($stmt_check_dup->num_rows > 0) {
+                $is_duplicate = true;
+            }
+            $stmt_check_dup->close();
+        }
+    }
 
-    if ($query_ubah) {
+    if ($is_duplicate) {
         echo "<script>
-            Swal.fire({title: 'Ubah Data Berhasil', icon: 'success'}).then(() => {
-                window.location = 'index.php?page=MyApp/data_pengguna';
-            });
+        Swal.fire({title: 'Ubah Data Gagal',text: 'Username sudah digunakan oleh pengguna lain!',icon: 'error',confirmButtonText: 'OK'
+        }).then(() => {
+            window.location = 'index.php?page=MyApp/edit_pengguna&kode=$id_pengguna';
+        });
         </script>";
     } else {
-        echo "<script>
-            Swal.fire({title: 'Ubah Data Gagal', text: '". mysqli_error($koneksi) ."', icon: 'error'}).then(() => {
-                window.location = 'index.php?page=MyApp/data_pengguna';
-            });
-        </script>";
+        // 3. Persiapkan Query UPDATE
+        $query_ubah = false;
+        
+        if (!empty($password_baru)) {
+            // Update dengan Password baru (MD5)
+            $hashed_password = md5($password_baru);
+            $stmt_ubah = $koneksi->prepare("UPDATE tb_pengguna SET nama_pengguna=?, username=?, password=?, level=? WHERE id_pengguna=?");
+            if ($stmt_ubah) {
+                $stmt_ubah->bind_param("sssss", $nama_pengguna, $username, $hashed_password, $level, $id_pengguna);
+                $query_ubah = $stmt_ubah->execute();
+                $stmt_ubah->close();
+            }
+        } else {
+            // Update tanpa mengubah Password
+            $stmt_ubah = $koneksi->prepare("UPDATE tb_pengguna SET nama_pengguna=?, username=?, level=? WHERE id_pengguna=?");
+            if ($stmt_ubah) {
+                $stmt_ubah->bind_param("ssss", $nama_pengguna, $username, $level, $id_pengguna);
+                $query_ubah = $stmt_ubah->execute();
+                $stmt_ubah->close();
+            }
+        }
+
+        // 4. Feedback ke User
+        if ($query_ubah) {
+            echo "<script>
+                Swal.fire({title: 'Ubah Data Berhasil', icon: 'success'}).then(() => {
+                    window.location = 'index.php?page=MyApp/data_pengguna';
+                });
+            </script>";
+        } else {
+            // Tampilkan pesan error database hanya jika prepared statement berhasil tapi execute gagal
+            $error_msg = $koneksi->error ? "Terjadi kesalahan database: ". $koneksi->error : "Terjadi kesalahan saat mengupdate data.";
+            echo "<script>
+                Swal.fire({title: 'Ubah Data Gagal', text: '$error_msg', icon: 'error'}).then(() => {
+                    window.location = 'index.php?page=MyApp/data_pengguna';
+                });
+            </script>";
+        }
     }
 }
 ?>

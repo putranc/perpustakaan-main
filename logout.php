@@ -1,5 +1,13 @@
 <?php
-    session_start();
-    session_destroy();
-    echo "<script>location='login.php'</script>";
+session_start();
+session_unset();
+session_destroy();
+
+// Cegah pengguna kembali ke halaman sebelumnya
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Cache-Control: post-check=0, pre-check=0", false);
+header("Pragma: no-cache");
+
+echo "<script>window.location.href='login.php';</script>";
+exit();
 ?>

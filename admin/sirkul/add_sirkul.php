@@ -1,10 +1,13 @@
 <?php 
-//kode otomatis
+// Definisikan batas maksimum pinjam (misalnya: 3 buku per anggota)
+$batas_pinjam_maksimal = 3;
+
+// kode otomatis
 $carikode = mysqli_query($koneksi, "SELECT id_sk FROM tb_sirkulasi ORDER BY id_sk DESC");
 $datakode = mysqli_fetch_array($carikode);
 $kode = $datakode['id_sk'];
 $urut = substr($kode, 1, 3);
-$tambah = (int)$urut + 1;
+$tambah = (int)$urut + 1; // <-- Ini seharusnya baris 10, atau di dekatnya
 
 if (strlen($tambah) == 1) {
     $format = "S"."00".$tambah;
@@ -69,7 +72,7 @@ if (strlen($tambah) == 1) {
 
     <div class="form-group">
         <label>Tanggal Pinjam</label>
-        <input type="date" name="tgl_pinjam" class="form-control" required>
+        <input type="date" name="tgl_pinjam" class="form-control" required max="<?php echo date('Y-m-d'); ?>">
     </div>
 </div>
 
@@ -86,24 +89,62 @@ if (strlen($tambah) == 1) {
 <?php
 if (isset($_POST['Simpan'])) {
     $tgl_p = $_POST['tgl_pinjam'];
-    $tgl_k = date('Y-m-d', strtotime('+7 days', strtotime($tgl_p)));
+    $id_anggota = $_POST['id_anggota'];
+    $tgl_sekarang = date('Y-m-d');
+    $error = '';
 
-    $sql_simpan = "INSERT INTO tb_sirkulasi (id_sk, id_buku, id_anggota, tgl_pinjam, status, tgl_kembali)
-                   VALUES ('".$_POST['id_sk']."', '".$_POST['id_buku']."', '".$_POST['id_anggota']."',
-                           '".$_POST['tgl_pinjam']."', 'PIN', '$tgl_k')";
-    $sql_simpan .= "; INSERT INTO log_pinjam (id_buku, id_anggota, tgl_pinjam)
-                    VALUES ('".$_POST['id_buku']."', '".$_POST['id_anggota']."', '".$_POST['tgl_pinjam']."')";
+    // --- Perbaikan Defect 1: Validasi Tanggal Pinjam ---
+    if (strtotime($tgl_p) > strtotime($tgl_sekarang)) {
+        $error = 'Tanggal Pinjam tidak boleh lebih dari tanggal hari ini.';
+    }
+    // Logika ini memastikan hanya tanggal hari ini yang valid, mencegah masa lalu
+    if (strtotime($tgl_p) < strtotime($tgl_sekarang) && $tgl_p != $tgl_sekarang) {
+        $error = 'Tanggal Pinjam tidak boleh tanggal masa lalu.';
+    }
 
-    $query_simpan = mysqli_multi_query($koneksi, $sql_simpan);
+    // --- Perbaikan Defect 2: Validasi Batas Pinjam ---
+    if (empty($error)) {
+        $sql_hitung = "SELECT COUNT(id_sk) AS jumlah_pinjam FROM tb_sirkulasi WHERE id_anggota='$id_anggota' AND status='PIN'";
+        $query_hitung = mysqli_query($koneksi, $sql_hitung);
+        $data_hitung = mysqli_fetch_assoc($query_hitung);
+        $jumlah_pinjam_saat_ini = $data_hitung['jumlah_pinjam'];
 
-    if ($query_simpan) {
+        if ($jumlah_pinjam_saat_ini >= $batas_pinjam_maksimal) {
+            $error = "Anggota ini sudah meminjam $jumlah_pinjam_saat_ini buku. Batas maksimum pinjam adalah $batas_pinjam_maksimal buku.";
+        }
+    }
+
+    if (!empty($error)) {
+        // Tampilkan pesan error jika ada validasi yang gagal
         echo "<script>
-        Swal.fire({title: 'Tambah Data Berhasil', icon: 'success', confirmButtonText: 'OK'}).then((r)=>{if(r.value){window.location='index.php?page=data_sirkul';}})
+        Swal.fire({title: 'Tambah Data Gagal', text: '$error', icon: 'error', confirmButtonText: 'OK'}).then((r)=>{if(r.value){window.location='index.php?page=add_sirkul';}})
         </script>";
     } else {
-        echo "<script>
-        Swal.fire({title: 'Tambah Data Gagal', icon: 'error', confirmButtonText: 'OK'}).then((r)=>{if(r.value){window.location='index.php?page=add_sirkul';}})
-        </script>";
+        // Logika simpan jika semua validasi berhasil
+        $tgl_k = date('Y-m-d', strtotime('+7 days', strtotime($tgl_p)));
+
+        // Menggunakan mysqli_query biasa karena mysqli_multi_query tidak selalu didukung
+        // Atau pisahkan menjadi dua query terpisah
+        
+        $sql_simpan_sirkulasi = "INSERT INTO tb_sirkulasi (id_sk, id_buku, id_anggota, tgl_pinjam, status, tgl_kembali)
+                            VALUES ('".$_POST['id_sk']."', '".$_POST['id_buku']."', '".$_POST['id_anggota']."',
+                                    '".$_POST['tgl_pinjam']."', 'PIN', '$tgl_k')";
+                                    
+        $sql_simpan_log = "INSERT INTO log_pinjam (id_buku, id_anggota, tgl_pinjam)
+                           VALUES ('".$_POST['id_buku']."', '".$_POST['id_anggota']."', '".$_POST['tgl_pinjam']."')";
+
+        $query_sirkulasi = mysqli_query($koneksi, $sql_simpan_sirkulasi);
+        $query_log = mysqli_query($koneksi, $sql_simpan_log);
+
+        if ($query_sirkulasi && $query_log) {
+            echo "<script>
+            Swal.fire({title: 'Tambah Data Berhasil', icon: 'success', confirmButtonText: 'OK'}).then((r)=>{if(r.value){window.location='index.php?page=data_sirkul';}})
+            </script>";
+        } else {
+            echo "<script>
+            Swal.fire({title: 'Tambah Data Gagal', text: 'Error: ".mysqli_error($koneksi)."', icon: 'error', confirmButtonText: 'OK'}).then((r)=>{if(r.value){window.location='index.php?page=add_sirkul';}})
+            </script>";
+        }
     }
 }
 ?>
